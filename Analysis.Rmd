@@ -1,0 +1,138 @@
+---
+title: "Metabarcoding"
+output: html_document
+date: "`r Sys.Date()`"
+---
+[Github](https://github.com/dvlaminck/metabarcoding "GitHub Repository")
+
+Uploading necessary packages 
+```{r}
+library(dplyr)
+library(ggplot2)
+library(ape)
+library(ggtree)
+library(vegan)
+library(tidyverse)
+```
+Inputting dataset:
+```{r}
+survey <- read.csv("FloristicSurvey.csv")
+head(survey)
+```
+Cleaning dataframe to only include microbiome data/making Quadrate ID the row names for distance matrix:
+```{r}
+survey1 <- survey %>%
+  remove_rownames %>% #removes row names
+  column_to_rownames(var="Quadrate") %>% #replaces row names with quadrate ID
+  dplyr::select(-c(Population, Location, Rosettes, Bolting, Budding, Bud_Flw, Flower, Flw_Sil, Sillique)) #Dropping columns that are unrelated to microbiome data
+head(survey1)
+```
+Transposing so quadrate ID are across the top:
+```{r}
+tsurvey <- t(survey1)
+head(tsurvey)
+```
+Generating binary data:
+```{r}
+#Shortcut from tutorial does not work in this case, so performing a loop to make binary data
+Binsurvey<-survey1
+for(row in 1:nrow(survey1)){
+  for(col in 1:ncol(survey1)){
+    if(Binsurvey[row,col]>0){
+      Binsurvey[row,col]<-1 #If observation is >=1, replace with 1, otherwise 0
+    }
+  }
+}
+Binsurvey
+```
+
+Generating a distance matrix to analyze:
+```{r}
+survey_dist<-dist(Binsurvey,method='binary')
+survey_matrix<-as.matrix(survey_dist)
+survey_matrix
+```
+
+1. What effect (if any) does garlic mustard have on the plant community?
+
+Tree based on neighbour joining + regular distance matrix from above:
+```{r}
+survey_tree<-nj(survey_matrix)
+ggtree(survey_tree,layout="rectangular") %<+% survey +
+  geom_tiplab(aes(colour=Location)) +
+  theme(legend.position="right")
+```
+
+Tree based on neighbour joining + bray-curtis similarity:
+```{r}
+survey_Bdist<-vegdist(survey1,method="bray",binary=F)
+survey_tree2 <- nj(survey_Bdist)
+ggtree(survey_tree2,layout="rectangular") %<+% survey +
+  geom_tiplab(aes(colour=Location)) +
+  theme(legend.position="right")
+```
+Figure 1: A neighbour-joining tree demonstrating the differences between quadrant samples' microbiome composition. Quadrant names are classified (coloured) by their location: i represents measurements from a quadrant within a garlic mustard patch, while o represents quadrants not inside of a garlic mustard patch.
+
+The bray-curtis dissimilarity score changed the topology slightly because it is organizing the tree based on how different the groups are from one another. This provides us with a more accurate reading compared to our original distance matrix, which was simply separating the quadrants. Therefore, we will proceed with using the bray-curtis score in our analysis.
+
+```{r}
+ggtree(survey_tree2,layout="rectangular") %<+% survey +
+  geom_tiplab(aes(colour=Budding)) +
+  theme(legend.position="right")
+```
+Figure 2: A neighbour-joining tree demonstrating the differences between quadrant samples' microbiome composition. Quadrant names are classified (coloured) based on the number of garlic mustard plants with buds within the quadrant, ranging from 0-200.
+
+```{r}
+ggtree(survey_tree2,layout="rectangular") %<+% survey +
+  geom_tiplab(aes(colour=Rosettes)) +
+  theme(legend.position="right")
+```
+Figure 3: A neighbour-joining tree demonstrating the differences between quadrant samples' microbiome composition. Quadrant names are classified (coloured) based on the number of garlic mustard rosettes within the quadrant, ranging from 0-15.
+
+Based on the previous trees, we can determine that there is no strong classification of quadrant samples based on the presence/absence of a garlic mustard patch, number of garlic mustard plants with buds, or the number of garlic mustard rosettes. Within the trees, there is no clustering of quadrants with similar previously listed traits. However, there are a few instances where quadrants with similar traits also have similar microbiomes. For example, quadrants with <5 garlic mustard rosettes tend to be more similar in their microbiome based on Figure 3. Although, in general, there is no real pattern indicating that these traits are associated with a similar microbiome among quadrants. Therefore, we can determine that garlic mustard has a limited impact on the plant community.
+
+2. What has a stronger effect on plant communities: the presence/absence of garlic mustard (in/out) or sampling population?
+
+Generating a similarity tree for sampling population:
+```{r}
+ggtree(survey_tree2,layout="rectangular") %<+% survey +
+  geom_tiplab(aes(colour=factor(Population))) +
+  theme(legend.position="right") +
+  labs(colour = "Quadrant Population") 
+```
+Figure 4: A neighbour-joining tree demonstrating the differences between quadrant samples' microbiome composition. Quadrant names are classified (coloured) based on the specific sampling location (population) at QUBS, determined by the presence of garlic mustard nearby. Populations sampled were from the following locations: 1, 3, 7, 13, and 13.
+
+Based on figure 4, we can see that generally, quadrants sampled within the sample population (location) have a more similar microbiome composition. For example, all quadrants sampled from population 7 form a 'clade' within this tree. It is important to note that this tree is not a phylogeny, however this still means that the quadrants sampled from population 7 are most similar to one another. While there are a few outliers, this tree tells us that population is a good indicator of how similar different quadrants are to one another in their microbiome.
+
+Generating a NMDS for visualizing similarity:
+```{r}
+NMDSdat<-metaMDS(survey_Bdist,k = 2, trymax = 100)
+```
+
+Creating data for plotting and adding labels:
+```{r}
+NMDS<-data.frame(NMDS1=NMDSdat$points[,1],
+                 NMDS2=NMDSdat$points[,2],
+                 SampleID=row.names(survey1))
+
+survey <- survey %>%
+  rename(SampleID = Quadrate) #Renaming quadrate column as SpeciesID so I can merge the dataframes
+
+NMDS <-merge(NMDS,survey,by="SampleID",all.x=T,all.y=F)
+head(NMDS)
+```
+
+Plotting the data:
+```{r}
+ggplot(NMDS, aes(x=NMDS1, y=NMDS2, colour = factor(Population))) + geom_point() + theme_classic() + labs(colour = "Quadrant Population") 
+```
+Figure 5: A non-metric multidimensional scaling (NMDS) plot demonstrating the similarity/differences among the different quadrant samples. Dissimilarity matrix was defined by two dimensions to visualize relationships among the variables. The plot represents the two dissimilarity dimensions (x and y axis) for each quadrant sample. Quadrant sample are categorized (coloured) based on the specific sampling location (population) at QUBS, determined by the presence of garlic mustard nearby.
+
+```{r}
+ggplot(NMDS, aes(x=NMDS1, y=NMDS2, colour = factor(Location))) + geom_point() + theme_classic() + labs(colour = "Presence of Garlic Mustard Patch") 
+```
+Figure 6: A NMDS plot demonstrating the similarity/differences among the different quadrant samples. Dissimilarity matrix was defined by two dimensions to visualize relationships among the variables. The plot represents the two dissimilarity dimensions (x and y axis) for each quadrant sample. Quadrant sample are categorized (coloured) by their location: i represents measurements from a quadrant within a garlic mustard patch, while o represents quadrants not inside of a garlic mustard patch.
+
+In figure 5, we can see that the quandrants from each population have very similar dissimilarity scores, hence why there are clustered by colour within the plot. Alternatively, when categorized by their location, quadrant samples tend to vary in their dissimilarity scores. This is why the points in figure 6 the points are scattered, rather than clustered by colour.
+
+Based on the tree diagrams between population and location of samples, as well as NMDS plots, we can determine that sampling population has a stronger effect on plant communities. While plants vary in their microbiome when classified by the presence or absence of garlic mustard, plants in the same population at QUBS clearly have very similar microbiomes. These findings suggest population has a strong impact on plant microbiome, and the community in general.
